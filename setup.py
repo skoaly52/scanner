@@ -1,117 +1,201 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""
+Automated Environment Setup Script
+This script automates the setup process for development tools on Windows
+"""
 
 import os
 import sys
 import subprocess
 import platform
+import urllib.request
+import tempfile
+import ctypes
+import time
 
-def run_command(command, check=True):
-    """تنفيذ أمر في سطر الأوامر"""
+def is_admin():
+    """Check if the script is running with administrator privileges"""
     try:
-        print(f"جاري تنفيذ: {command}")
-        result = subprocess.run(command, shell=True, check=check, text=True, capture_output=True)
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def run_command(command, check=True, shell=True):
+    """Execute a command in the command line"""
+    try:
+        print(f"Executing: {command}")
+        result = subprocess.run(command, shell=shell, check=check, 
+                              text=True, capture_output=True, encoding='utf-8')
         if result.stdout:
             print(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"خطأ في التنفيذ: {e}")
+        print(f"Error executing command: {e}")
         if e.stderr:
-            print(f"خطأ: {e.stderr}")
+            print(f"Error output: {e.stderr}")
         return False
 
 def install_chocolatey():
-    """تثبيت Chocolatey مدير الحزم لـ Windows"""
+    """Install Chocolatey package manager for Windows"""
     if run_command('choco --version', check=False):
-        print("Chocolatey مثبت مسبقاً")
+        print("Chocolatey is already installed")
         return True
     
-    print("جاري تثبيت Chocolatey...")
-    command = 'Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))'
-    return run_command(f'powershell -Command "{command}"')
+    print("Installing Chocolatey...")
+    # Using the official Chocolatey install command
+    install_cmd = (
+        "Set-ExecutionPolicy Bypass -Scope Process -Force; "
+        "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; "
+        "iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+    )
+    return run_command(f'powershell -Command "{install_cmd}"')
 
 def install_python():
-    """التأكد من تثبيت بايثون"""
+    """Ensure Python is installed"""
     if run_command('python --version', check=False) or run_command('py --version', check=False):
-        print("بايثون مثبت مسبقاً")
+        print("Python is already installed")
         return True
     
-    print("جاري تثبيت بايثون...")
+    print("Installing Python via Chocolatey...")
     return run_command('choco install python -y')
 
 def install_git():
-    """التأكد من تثبيت Git"""
+    """Ensure Git is installed"""
     if run_command('git --version', check=False):
-        print("Git مثبت مسبقاً")
+        print("Git is already installed")
         return True
     
-    print("جاري تثبيت Git...")
+    print("Installing Git via Chocolatey...")
     return run_command('choco install git -y')
 
+def install_vscode():
+    """Install Visual Studio Code"""
+    if run_command('code --version', check=False):
+        print("VS Code is already installed")
+        return True
+    
+    print("Installing Visual Studio Code...")
+    return run_command('choco install vscode -y')
+
 def install_requirements():
-    """تثبيت المتطلبات من ملف requirements.txt إذا وجد"""
+    """Install requirements from requirements.txt if it exists"""
     if os.path.exists('requirements.txt'):
-        print("جاري تثبيت المتطلبات من requirements.txt...")
+        print("Installing Python requirements...")
         return run_command('pip install -r requirements.txt')
     else:
-        print("لم يتم العثور على ملف requirements.txt")
+        print("No requirements.txt file found")
         return True
 
 def setup_wsl():
-    """إعداد WSL لتشغيل أدوات Kali Linux"""
-    print("جاري التحقق من إعداد WSL...")
+    """Set up WSL for running Linux tools"""
+    print("Checking WSL setup...")
     
-    # التحقق إذا كان WSL مثبتاً
+    # Check if WSL is already installed
     if run_command('wsl --list --quiet', check=False):
-        print("WSL مثبت مسبقاً")
-    else:
-        print("جاري تثبيت WSL...")
-        if not run_command('wsl --install'):
-            print("فشل تثبيت WSL. تأكد من تفعيل Virtualization في BIOS")
-            return False
+        print("WSL is already installed")
+        return True
     
-    # التحقق من وجود توزيعة Kali Linux
-    if not run_command('wsl --list | findstr Kali', check=False):
-        print("جاري تثبيت Kali Linux على WSL...")
-        if not run_command('wsl --install -d Kali-Linux'):
-            print("فشل تثبيت Kali Linux. يمكنك تثبيته يدوياً من Microsoft Store")
+    print("Installing WSL...")
+    if run_command('wsl --install'):
+        print("WSL installed successfully. A reboot might be required.")
+        return True
+    else:
+        print("Failed to install WSL. Trying manual installation...")
+        return run_command('dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart')
+
+def install_additional_tools():
+    """Install additional useful tools"""
+    tools = [
+        'nodejs',
+        'curl',
+        '7zip',
+        'googlechrome',
+        'firefox'
+    ]
+    
+    print("Installing additional development tools...")
+    for tool in tools:
+        run_command(f'choco install {tool} -y', check=False)
+    
+    return True
+
+def check_system_requirements():
+    """Check if system meets minimum requirements"""
+    print("Checking system requirements...")
+    
+    # Check Windows version
+    win_version = platform.version()
+    print(f"Windows Version: {win_version}")
+    
+    # Check architecture
+    arch = platform.machine()
+    print(f"Architecture: {arch}")
+    
+    # Check RAM
+    try:
+        import psutil
+        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        print(f"RAM: {ram_gb:.1f} GB")
+        if ram_gb < 4:
+            print("Warning: Less than 4GB RAM may cause performance issues")
+    except:
+        print("Install psutil with: pip install psutil for detailed system info")
     
     return True
 
 def main():
-    """الدالة الرئيسية"""
-    print("=" * 50)
-    print("برنامج الإعداد الآلي للأداة")
-    print("=" * 50)
+    """Main setup function"""
+    print("=" * 60)
+    print("Automated Development Environment Setup")
+    print("=" * 60)
     
-    # التحقق من نظام التشغيل
+    # Check if running on Windows
     if platform.system() != 'Windows':
-        print("هذا البرنامج مخصص لنظام Windows فقط")
+        print("This script is designed for Windows only")
         return
     
-    # تثبيت المتطلبات الأساسية
+    # Check admin privileges
+    if not is_admin():
+        print("Please run this script as Administrator for full functionality")
+        print("Right-click on Command Prompt or PowerShell and select 'Run as administrator'")
+    
+    # Setup process
+    print("\nStarting setup process...")
+    
     success = True
     success &= install_chocolatey()
     success &= install_python()
     success &= install_git()
+    success &= install_vscode()
     success &= install_requirements()
     
-    # اقتراح إعداد WSL للأدوات التي تتطلب Linux
-    print("\nهل تريد إعداد WSL لتشغيل أدوات Kali Linux؟ (y/n)")
-    choice = input().lower()
-    if choice == 'y' or choice == 'yes':
+    # Ask about WSL setup
+    print("\nDo you want to set up WSL for Linux tools? (y/n)")
+    choice = input().lower().strip()
+    if choice in ['y', 'yes']:
         success &= setup_wsl()
     
-    if success:
-        print("\n" + "=" * 50)
-        print("تم الإعداد بنجاح! ✅")
-        print("=" * 50)
-    else:
-        print("\n" + "=" * 50)
-        print("حدثت بعض الأخطاء أثناء الإعداد ❌")
-        print("=" * 50)
+    # Ask about additional tools
+    print("\nDo you want to install additional development tools? (y/n)")
+    choice = input().lower().strip()
+    if choice in ['y', 'yes']:
+        success &= install_additional_tools()
     
-    input("\nاضغط Enter للإغلاق...")
+    # Final status
+    print("\n" + "=" * 60)
+    if success:
+        print("Setup completed successfully! ✅")
+        print("\nNext steps:")
+        print("1. Restart your computer if prompted")
+        print("2. Open VS Code and install recommended extensions")
+        print("3. Run 'git config --global user.name \"Your Name\"'")
+        print("4. Run 'git config --global user.email \"your.email@example.com\"'")
+    else:
+        print("Setup completed with some errors ❌")
+        print("Check the messages above for issues")
+    
+    print("=" * 60)
+    input("\nPress Enter to close...")
 
 if __name__ == "__main__":
     main()
