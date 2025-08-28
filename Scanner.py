@@ -9,8 +9,10 @@ import csv
 from datetime import datetime
 import socket
 import ssl
-import dns.resolver
 import re
+import subprocess
+import sys
+from bs4 import BeautifulSoup
 
 class DarkVulnerabilityScanner:
     def __init__(self, root):
@@ -111,6 +113,7 @@ class DarkVulnerabilityScanner:
         self.ports_var = tk.BooleanVar(value=False)
         self.crlf_var = tk.BooleanVar(value=True)
         self.jwt_var = tk.BooleanVar(value=False)
+        self.backup_var = tk.BooleanVar(value=True)
         
         ttk.Checkbutton(options_frame, text="SQL Injection", variable=self.sql_var).grid(row=0, column=0, sticky=tk.W, pady=2)
         ttk.Checkbutton(options_frame, text="XSS", variable=self.xss_var).grid(row=0, column=1, sticky=tk.W, pady=2)
@@ -123,6 +126,7 @@ class DarkVulnerabilityScanner:
         ttk.Checkbutton(options_frame, text="Open Ports", variable=self.ports_var).grid(row=2, column=0, sticky=tk.W, pady=2)
         ttk.Checkbutton(options_frame, text="CRLF Injection", variable=self.crlf_var).grid(row=2, column=1, sticky=tk.W, pady=2)
         ttk.Checkbutton(options_frame, text="JWT Vulnerabilities", variable=self.jwt_var).grid(row=2, column=2, sticky=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Backup Files", variable=self.backup_var).grid(row=2, column=3, sticky=tk.W, pady=2)
         
         # Buttons
         button_frame = ttk.Frame(main_frame)
@@ -289,6 +293,7 @@ class DarkVulnerabilityScanner:
             'ports': self.ports_var.get(),
             'crlf': self.crlf_var.get(),
             'jwt': self.jwt_var.get(),
+            'backup': self.backup_var.get(),
             'depth': self.depth_var.get()
         }
         
@@ -335,7 +340,7 @@ class DarkVulnerabilityScanner:
             self.log_info(f"Technologies: {', '.join(info.get('technologies', []))}")
             
             # Security headers check
-            if options['headers']:
+            if options['headers'] and self.scanning:
                 self.update_status("Checking security headers...")
                 headers_vulns = scanner.check_security_headers()
                 for vuln in headers_vulns:
@@ -344,7 +349,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # CORS misconfigurations
-            if options['cors']:
+            if options['cors'] and self.scanning:
                 self.update_status("Checking CORS settings...")
                 cors_vulns = scanner.check_cors()
                 for vuln in cors_vulns:
@@ -353,7 +358,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # Information disclosure
-            if options['info']:
+            if options['info'] and self.scanning:
                 self.update_status("Looking for information disclosure...")
                 info_vulns = scanner.check_info_disclosure()
                 for vuln in info_vulns:
@@ -362,7 +367,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # Hidden paths
-            if options['paths']:
+            if options['paths'] and self.scanning:
                 self.update_status("Searching for hidden paths...")
                 found_paths = scanner.scan_common_files()
                 for path in found_paths:
@@ -371,7 +376,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # SSL/TLS check
-            if options['ssl']:
+            if options['ssl'] and self.scanning:
                 self.update_status("Checking SSL/TLS configuration...")
                 ssl_vulns = scanner.check_ssl()
                 for vuln in ssl_vulns:
@@ -380,7 +385,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # SQL Injection
-            if options['sql'] and not self.scanning:
+            if options['sql'] and self.scanning:
                 self.update_status("Checking for SQL Injection vulnerabilities...")
                 sql_vulns = scanner.check_sql_injection()
                 for vuln in sql_vulns:
@@ -389,7 +394,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # XSS
-            if options['xss'] and not self.scanning:
+            if options['xss'] and self.scanning:
                 self.update_status("Checking for XSS vulnerabilities...")
                 xss_vulns = scanner.check_xss()
                 for vuln in xss_vulns:
@@ -398,7 +403,7 @@ class DarkVulnerabilityScanner:
                     stats['vulnerabilities'] += 1
             
             # CRLF Injection
-            if options['crlf'] and not self.scanning:
+            if options['crlf'] and self.scanning:
                 self.update_status("Checking for CRLF Injection vulnerabilities...")
                 crlf_vulns = scanner.check_crlf_injection()
                 for vuln in crlf_vulns:
@@ -406,8 +411,17 @@ class DarkVulnerabilityScanner:
                     stats['medium'] += 1
                     stats['vulnerabilities'] += 1
             
+            # Backup files
+            if options['backup'] and self.scanning:
+                self.update_status("Searching for backup files...")
+                backup_vulns = scanner.check_backup_files()
+                for vuln in backup_vulns:
+                    self.log_vulnerability("MEDIUM", "Backup File Exposure", vuln['description'], vuln['url'])
+                    stats['medium'] += 1
+                    stats['vulnerabilities'] += 1
+            
             # Subdomain enumeration
-            if options['subdomain'] and not self.scanning:
+            if options['subdomain'] and self.scanning:
                 self.update_status("Enumerating subdomains...")
                 subdomains = scanner.enumerate_subdomains()
                 for subdomain in subdomains:
@@ -415,7 +429,7 @@ class DarkVulnerabilityScanner:
                     stats['info'] += 1
             
             # Port scanning
-            if options['ports'] and not self.scanning:
+            if options['ports'] and self.scanning:
                 self.update_status("Scanning for open ports...")
                 open_ports = scanner.scan_ports()
                 for port_info in open_ports:
@@ -466,6 +480,14 @@ class DarkVulnerabilityScanner:
             self.info_text.insert(tk.END, f"   URL: {url}\n")
             self.info_text.insert(tk.END, f"   Details: {details}\n\n")
             self.info_text.see(tk.END)
+            
+            # Save to scan results
+            self.scan_results.append({
+                'severity': severity,
+                'type': title,
+                'description': details,
+                'url': url
+            })
         
         if self.scanning:  # Only update if still scanning
             self.root.after(0, update)
@@ -518,16 +540,16 @@ class DarkVulnerabilityScanner:
             
         try:
             if file_path.endswith('.json'):
-                with open(file_path, 'w') as f:
-                    json.dump(self.scan_results, f, indent=4)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.scan_results, f, indent=4, ensure_ascii=False)
             elif file_path.endswith('.csv'):
-                with open(file_path, 'w', newline='') as f:
+                with open(file_path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     writer.writerow(['Severity', 'Type', 'Description', 'URL'])
                     for result in self.scan_results:
                         writer.writerow([result['severity'], result['type'], result['description'], result['url']])
             elif file_path.endswith('.html'):
-                with open(file_path, 'w') as f:
+                with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.generate_html_report())
             else:
                 messagebox.showerror("Error", "Unsupported file format")
@@ -579,7 +601,7 @@ class DarkVulnerabilityScanner:
                     <td class="{result['severity'].lower()}">{result['severity']}</td>
                     <td>{result['type']}</td>
                     <td>{result['description']}</td>
-                    <td>{result['url']}</td>
+                    <td><a href="{result['url']}" target="_blank">{result['url']}</a></td>
                 </tr>
             """
         
@@ -626,6 +648,11 @@ class DarkVulnerabilityScanner:
         remediation = self.get_remediation_advice(vuln_type)
         text_widget.insert(tk.END, remediation)
         
+        # Add exploitation info
+        text_widget.insert(tk.END, "\nExploitation:\n", "bold")
+        exploitation = self.get_exploitation_info(vuln_type)
+        text_widget.insert(tk.END, exploitation)
+        
         text_widget.config(state=tk.DISABLED)
     
     def get_remediation_advice(self, vuln_type):
@@ -637,10 +664,26 @@ class DarkVulnerabilityScanner:
             "Information disclosure": "• Disable detailed error messages in production\n• Remove unnecessary information from headers\n• Secure configuration files and backup files\n• Implement proper access controls",
             "Exposed sensitive path": "• Remove or secure sensitive files and directories\n• Implement proper access controls\n• Use robots.txt to disallow sensitive paths\n• Regularly audit exposed files and directories",
             "SSL/TLS Issue": "• Use strong encryption protocols (TLS 1.2+)\n• Disable weak ciphers\n• Ensure certificates are valid and not expired\n• Implement proper certificate chain\n• Consider using HSTS",
-            "CRLF Injection": "• Validate and sanitize user input\n• Encode CRLF sequences in user input\n• Use security headers where applicable\n• Implement proper output encoding"
+            "CRLF Injection": "• Validate and sanitize user input\n• Encode CRLF sequences in user input\n• Use security headers where applicable\n• Implement proper output encoding",
+            "Backup File Exposure": "• Remove unnecessary backup files from production\n• Restrict access to backup directories\n• Use proper authentication and authorization\n• Regularly audit files exposed on web servers"
         }
         
         return advice.get(vuln_type, "• Consult security best practices for this vulnerability type\n• Keep software and dependencies updated\n• Implement regular security testing\n• Follow the principle of least privilege")
+    
+    def get_exploitation_info(self, vuln_type):
+        exploitation = {
+            "SQL Injection": "• Use tools like SQLmap for automated exploitation\n• Try to extract database structure, tables, and sensitive data\n• Attempt to bypass authentication mechanisms\n• Use UNION-based attacks to extract data from other tables",
+            "XSS": "• Craft malicious scripts to steal cookies or session tokens\n• Use keyloggers to capture user input\n• Perform phishing attacks by modifying page content\n• Use BeEF framework for advanced exploitation",
+            "Missing security header": "• Exploit clickjacking vulnerabilities if X-Frame-Options is missing\n• Use MIME sniffing attacks if X-Content-Type-Options is missing\n• Bypass CSP protections if not properly configured",
+            "CORS Misconfiguration": "• Craft malicious requests from attacker-controlled domains\n• Exploit overly permissive CORS settings to steal sensitive data\n• Use with XSS to escalate attack impact",
+            "Information disclosure": "• Use exposed information to plan targeted attacks\n• Find usernames, emails for social engineering\n• Discover technology versions to exploit known vulnerabilities",
+            "Exposed sensitive path": "• Access configuration files to find credentials\n• Download backup files to analyze source code\n• Find administrative interfaces for brute force attacks",
+            "SSL/TLS Issue": "• Use tools like SSLScan to identify weak ciphers\n• Perform man-in-the-middle attacks on weak encryption\n• Exploit certificate validation flaws",
+            "CRLF Injection": "• Inject custom HTTP headers\n• Split responses to bypass security controls\n• Perform HTTP response smuggling attacks",
+            "Backup File Exposure": "• Download backup files to analyze source code\n• Extract database credentials and other sensitive information\n• Use source code to find additional vulnerabilities"
+        }
+        
+        return exploitation.get(vuln_type, "• Research specific exploitation techniques for this vulnerability\n• Use automated tools where appropriate\n• Consider the impact of successful exploitation")
 
 
 class AdvancedScanner:
@@ -885,6 +928,27 @@ class AdvancedScanner:
                 
         return found_paths
     
+    def check_backup_files(self):
+        vulnerabilities = []
+        backup_extensions = ['.bak', '.backup', '.old', '.tmp', '.temp', '.swp', '.swo']
+        base_url = self.target_url.rstrip('/')
+        
+        # Try common backup file patterns
+        for ext in backup_extensions:
+            test_url = f"{base_url}{ext}"
+            try:
+                response = self.session.get(test_url, timeout=5, allow_redirects=False)
+                if response.status_code == 200 and len(response.content) > 0:
+                    vulnerabilities.append({
+                        'description': f"Backup file found: {test_url}",
+                        'severity': 'MEDIUM',
+                        'url': test_url
+                    })
+            except:
+                continue
+                
+        return vulnerabilities
+    
     def check_ssl(self):
         vulnerabilities = []
         try:
@@ -896,10 +960,16 @@ class AdvancedScanner:
                     cert = ssock.getpeercert()
                     
                     # Check certificate expiration
-                    not_after = cert.get('notAfter', '')
-                    if not_after:
-                        expire_date = datetime.strptime(not_after, '%b %d %H:%M:%S %Y %Z')
-                        if expire_date < datetime.now() + timedelta(days=30):
+                    if 'notAfter' in cert:
+                        from datetime import datetime
+                        expire_date = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z')
+                        if expire_date < datetime.now():
+                            vulnerabilities.append({
+                                'description': f"SSL certificate has expired: {expire_date.strftime('%Y-%m-%d')}",
+                                'severity': 'HIGH',
+                                'url': self.target_url
+                            })
+                        elif expire_date < datetime.now() + timedelta(days=30):
                             vulnerabilities.append({
                                 'description': f"SSL certificate expires soon: {expire_date.strftime('%Y-%m-%d')}",
                                 'severity': 'MEDIUM',
@@ -917,7 +987,7 @@ class AdvancedScanner:
                     
                     # Check cipher strength
                     cipher = ssock.cipher()
-                    if cipher and 'weak' in cipher[0].lower():
+                    if cipher and ('RC4' in cipher[0] or 'DES' in cipher[0] or '3DES' in cipher[0]):
                         vulnerabilities.append({
                             'description': f"Using weak cipher: {cipher[0]}",
                             'severity': 'MEDIUM',
@@ -1126,7 +1196,14 @@ class AdvancedScanner:
         return open_ports
 
 
+# Fix for Windows compatibility
 if __name__ == "__main__":
+    # Handle Windows-specific issues
+    if sys.platform == "win32":
+        # Fix for Windows high DPI scaling
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+    
     root = tk.Tk()
     app = DarkVulnerabilityScanner(root)
     root.mainloop()
