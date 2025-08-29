@@ -1,14 +1,12 @@
-<<<<<<< HEAD
-# scanner
-# scanner
-=======
-# Scanner Tool
+# Dark Vulnerability Scanner Pro
 
-هذه أداة لفحص الثغرات.
+An advanced web vulnerability scanning tool with GUI interface.
 
-## كيفية التثبيت
-
-قبل تشغيل الأداة، شغل ملف الإعداد:
+## Installation
 
 ```bash
-python3 setup.py install
+# Install from setup.py
+pip install .
+
+# Or install directly
+pip install -r requirements.txt
