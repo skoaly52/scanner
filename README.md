@@ -12,4 +12,3 @@
 
 ```bash
 python3 setup.py install
->>>>>>> b3a84e1 (Add README file)
